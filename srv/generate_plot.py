@@ -1,21 +1,17 @@
-import io
 import datetime
-
-import numpy as np
-import matplotlib.dates as mdates
-
-from requests import get
+import io
 from urllib.request import urlopen
-from scipy.interpolate import griddata
 
-from bokeh.plotting import figure, output_file, save, show
-from bokeh.embed import components
-from bokeh.models import RangeTool, Range1d, CustomJSTickFormatter
-from bokeh.layouts import column
+import matplotlib.dates as mdates
+import numpy as np
 from bokeh import palettes
-from bokeh import __version__ as bokeh_version
-from bokeh.models import AdaptiveTicker
-
+from bokeh.core.templates import get_env
+from bokeh.layouts import column
+from bokeh.models import AdaptiveTicker, CustomJSTickFormatter, Range1d, RangeTool
+from bokeh.plotting import figure, save, show
+from bokeh.resources import CDN
+from requests import get
+from scipy.interpolate import griddata
 
 # ----------------------------------------------------------------------------------------
 # controls
@@ -25,9 +21,6 @@ DATA_SIN_URL = "https://www.atmohub.kit.edu/data/singapore.dat"
 
 # where to expect the QBO data
 DATA_QBO_URL = "https://www.atmohub.kit.edu/data/qbo.dat"
-
-# save plot+js to single html file?
-SAVE_STATIC = False
 
 # only show the plot, don't save it?
 SHOW = False
@@ -45,9 +38,9 @@ template_html = """
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>QBO-Plot</title>
-    <script type="text/javascript" src="https://cdn.bokeh.org/bokeh/release/bokeh-{bokeh_version}.min.js"></script>
-    <script type="text/javascript" src="https://cdn.bokeh.org/bokeh/release/bokeh-widgets-{bokeh_version}.min.js"></script>
+    <title>{{ title }}</title>
+    {{ bokeh_css }}
+    {{ bokeh_js }}
     <script type="text/javascript">
         Bokeh.set_log_level("info");
     </script>
@@ -59,9 +52,9 @@ template_html = """
     </style>
   </head>
   <body>
-    {{TEMPLATE_DIV}}
+    {{ plot_div }}
+    {{ plot_script }}
   </body>
-  <script src="plot.js"></script>
 </html>
 """
 
@@ -200,15 +193,11 @@ def read_qbo():
             dlen = dlen + 1
             if int(data["date"][i]) > 5000:
                 date.append(
-                    datetime.datetime.strptime(
-                        "19" + (data["date"][i]).decode("UTF-8"), "%Y%m"
-                    )
+                    datetime.datetime.strptime("19" + (data["date"][i]).decode("UTF-8"), "%Y%m")
                 )
             else:
                 date.append(
-                    datetime.datetime.strptime(
-                        "20" + (data["date"][i]).decode("UTF-8"), "%Y%m"
-                    )
+                    datetime.datetime.strptime("20" + (data["date"][i]).decode("UTF-8"), "%Y%m")
                 )
 
     fds = mdates.date2num(date)
@@ -231,6 +220,17 @@ def read_qbo():
     altitude = -7 * np.log(np.array(pressure) / 1013.25)
 
     return up, fds, pressure, altitude
+
+
+def make_layout(p, select):
+    """Stack the two figures vertically, stretching the layout to the container width.
+
+    The root Column must use the same sizing mode as the figures: with a fixed
+    Column, the stretch_width children report ~0 required width and the whole
+    layout collapses to a sliver.
+    """
+
+    return column(p, select, sizing_mode=SIZING_MODE)
 
 
 def main():
@@ -401,36 +401,20 @@ return `${date.toISOString()}`;
     colorbar.title_text_font_size = "15px"
     p.add_layout(colorbar, "below")
 
+    layout = make_layout(p, select)
+
     if SHOW:
-        show(column(p, select))
-        return None, None
+        show(layout)
+        return
 
-    if SAVE_STATIC:
-        output_file(filename="plot_only.html", title="Static HTML file")
-        save(column(p, select))
-        return None, None
-
-    return components(column(p, select))
+    save(
+        layout,
+        filename="plot.html",
+        title="QBO-Plot",
+        resources=CDN,
+        template=get_env().from_string(template_html),
+    )
 
 
 if __name__ == "__main__":
-
-    script, div = main()
-
-    # fmt: off
-    if all(x is not None for x in (script, div)):
-        updated_html = (
-            template_html
-                .replace("{{TEMPLATE_DIV}}", div)  # type: ignore
-                .replace("{bokeh_version}", bokeh_version)  # type: ignore
-        )  
-        with open("plot.html", "w") as file:
-            file.write(updated_html)
-
-        updated_script = (
-                script
-                    .replace('<script type="text/javascript">', "")  # type: ignore
-                    .replace("</script>", "")  # type: ignore
-        )
-        with open("plot.js", "w") as file:
-            file.write(updated_script)
+    main()
